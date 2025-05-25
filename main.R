@@ -16,7 +16,7 @@ ui <- dashboardPage(
   dashboardSidebar(
     sidebarMenu(
       menuItem("Wizualizacja", tabName = "wizualizacja", icon = icon("chart-line")),
-      menuItem("PKB", tabName = "pkb", icon = icon("money-bill"))
+      menuItem("Finanse", tabName = "pkb", icon = icon("money-bill"))
     )
   ),
   dashboardBody(
