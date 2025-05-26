@@ -33,7 +33,7 @@ server <- function(input, output, session) {
     get_eurostat("nama_10_pc", time_format = "date")
   })
 
-  tab_wizualizacja_server(input, output, session, dane_pkb)
+  tab_wizualizacja_server(input, output, session)
   tab_pkb_server(input, output, session, dane_pkb)
 }
 
