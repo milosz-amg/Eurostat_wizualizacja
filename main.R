@@ -46,7 +46,7 @@ server <- function(input, output, session) {
 })
 
 
-  tab_wizualizacja_server(input, output, session, dane_pkb)
+  tab_wizualizacja_server(input, output, session)
   tab_pkb_server(input, output, session, dane_pkb)
   tab_zatrudnienie_server(input, output, session)
   tab_energia_server(input, output, session)
