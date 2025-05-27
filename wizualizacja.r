@@ -6,30 +6,32 @@ library(leaflet)
 library(shinydashboard)
 
 tab_wizualizacja_ui <- tabItem(tabName = "wizualizacja",
-  h2("Wizualizacja"),
-  leafletOutput("mapaKraje", height = "300px"),
-  br(),
-  textOutput("wybranyKraj"),
-  br(),
   fluidRow(
-    column(12, uiOutput("krajNazwa"))
+    # Kolumna z mapą (szerokość 8/12)
+    column(8,
+      leafletOutput("mapaKraje", height = "600px", width = "100%")
+    ),
+    # Kolumna z kafelkami danych (szerokość 4/12)
+    column(4,
+      uiOutput("krajNazwa"),
+      br(),
+      uiOutput("krajPKB"),
+      br(),
+      uiOutput("krajPopulacja"),
+      br(),
+      uiOutput("krajBezrobocie"),
+      br(),
+      uiOutput("krajPowierzchnia")
+    )
   ),
   br(),
-  fluidRow(
-    column(6, uiOutput("krajPKB")),
-    column(6, uiOutput("krajPopulacja"))
-  ),
-  br(),
-  fluidRow(
-    column(6, uiOutput("krajBezrobocie")),
-    column(6, uiOutput("krajPowierzchnia"))
-  )
+  textOutput("wybranyKraj")
 )
 
 tab_wizualizacja_server <- function(input, output, session) {
 
   # === REACTIVE: Kliknięty kraj ===
-  wybrany_kraj <- reactiveVal(NULL)
+  wybrany_kraj <- reactiveVal("PL")
 
   observeEvent(input$mapaKraje_shape_click, {
     klik <- input$mapaKraje_shape_click
@@ -46,6 +48,7 @@ tab_wizualizacja_server <- function(input, output, session) {
   output$mapaKraje <- renderLeaflet({
     leaflet(granice_krajow()) %>%
       addTiles() %>%
+      setView(lng = 15, lat = 54, zoom = 4) %>%  # Przybliżenie na Europę
       addPolygons(
         layerId = ~geo,
         label = ~as.character(geo),
@@ -132,7 +135,8 @@ tab_wizualizacja_server <- function(input, output, session) {
   ME = "Czarnogóra",
   RS = "Serbia",
   MK = "Macedonia Północna",
-  EL = "Grecja"
+  EL = "Grecja",
+  AL = "Albania"
 )
 
 
