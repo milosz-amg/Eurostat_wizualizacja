@@ -33,12 +33,11 @@ tab_demografia_ui <- tabItem(
     valueBoxOutput("pop_vb_median_age", width = 3)
   ),
   fluidRow(
-    box(width = 8, plotlyOutput("pop_trend", height = "400px")),
-    box(width = 4, plotlyOutput("pop_pyramid", height = "400px"))
+    box(width = 12, plotlyOutput("pop_trend", height = "400px"))
   ),
   fluidRow(
-    box(width = 6, plotlyOutput("birth_death_trend", height = "300px")),
-    box(width = 6, plotlyOutput("fertility_trend", height = "300px"))
+    box(width = 12, plotlyOutput("birth_death_trend", height = "300px")),
+    # box(width = 6, plotlyOutput("fertility_trend", height = "300px"))
   ),
   br(),
   fluidRow(
@@ -79,7 +78,7 @@ tab_demografia_server <- function(input, output, session) {
   )
 
   # --- DANE REAKTYWNE ---
-  
+
   # Populacja całkowita
   pop_data <- reactive({
     get_eurostat("demo_pjan", time_format = "date") %>%
@@ -89,70 +88,189 @@ tab_demografia_server <- function(input, output, session) {
       filter(between(year, input$pop_years[1], input$pop_years[2]))
   })
 
-  # Struktura wiekowa
-  pop_age_structure <- reactive({
-    get_eurostat("demo_pjan", time_format = "date") %>%
-      filter(geo == input$pop_country, sex == "T", age != "TOTAL") %>%
-      mutate(year = year(TIME_PERIOD)) %>%
-      filter(year == input$pop_years[2]) %>%
-      mutate(
-        age_group = case_when(
-          age %in% c("Y_LT5", "Y5-9", "Y10-14") ~ "0-14",
-          age %in% c("Y15-19", "Y20-24", "Y25-29", "Y30-34", "Y35-39", 
-                     "Y40-44", "Y45-49", "Y50-54", "Y55-59", "Y60-64") ~ "15-64",
-          TRUE ~ "65+"
-        )
-      ) %>%
-      group_by(age_group) %>%
-      summarise(population = sum(values, na.rm = TRUE), .groups = "drop")
+  # Urodzenia i zgony - POPRAWIONE - używa różnych tabel z Eurostat
+  birth_death_data <- reactive({
+    # Spróbuj kilka różnych źródeł danych
+
+    # Opcja 1: demo_r_gind3 - najbardziej kompletne dane
+    result1 <- tryCatch({
+      births <- get_eurostat("demo_r_gind3", time_format = "date") %>%
+        filter(geo == input$pop_country, indic_de == "GBIRTHRT") %>%
+        mutate(year = year(TIME_PERIOD)) %>%
+        select(geo, TIME_PERIOD, births = values, year) %>%
+        filter(between(year, input$pop_years[1], input$pop_years[2]))
+
+      deaths <- get_eurostat("demo_r_gind3", time_format = "date") %>%
+        filter(geo == input$pop_country, indic_de == "GDEATHRT") %>%
+        mutate(year = year(TIME_PERIOD)) %>%
+        select(geo, TIME_PERIOD, deaths = values, year) %>%
+        filter(between(year, input$pop_years[1], input$pop_years[2]))
+
+      natural_growth <- get_eurostat("demo_r_gind3", time_format = "date") %>%
+        filter(geo == input$pop_country, indic_de == "NATGRO") %>%
+        mutate(year = year(TIME_PERIOD)) %>%
+        select(geo, TIME_PERIOD, natural_growth = values, year) %>%
+        filter(between(year, input$pop_years[1], input$pop_years[2]))
+
+      # Połącz wszystkie dane
+      merged <- births %>%
+        full_join(deaths, by = c("geo", "TIME_PERIOD", "year")) %>%
+        full_join(natural_growth, by = c("geo", "TIME_PERIOD", "year")) %>%
+        arrange(TIME_PERIOD)
+
+      # Jeśli nie ma bezpośrednich danych o przyroście, oblicz z różnicy
+      if (all(is.na(merged$natural_growth)) && !all(is.na(merged$births)) && !all(is.na(merged$deaths))) {
+        merged$natural_growth <- merged$births - merged$deaths
+      }
+
+      return(merged)
+    }, error = function(e) NULL)
+
+    if (!is.null(result1) && nrow(result1) > 0) return(result1)
+
+    # Opcja 2: demo_gind z innymi kodami wskaźników
+    result2 <- tryCatch({
+      births <- get_eurostat("demo_gind", time_format = "date") %>%
+        filter(geo == input$pop_country, indic_de == "BIRTH") %>%
+        mutate(year = year(TIME_PERIOD)) %>%
+        select(geo, TIME_PERIOD, births = values, year) %>%
+        filter(between(year, input$pop_years[1], input$pop_years[2]))
+
+      deaths <- get_eurostat("demo_gind", time_format = "date") %>%
+        filter(geo == input$pop_country, indic_de == "DEATH") %>%
+        mutate(year = year(TIME_PERIOD)) %>%
+        select(geo, TIME_PERIOD, deaths = values, year) %>%
+        filter(between(year, input$pop_years[1], input$pop_years[2]))
+
+      merged <- full_join(births, deaths, by = c("geo", "TIME_PERIOD", "year")) %>%
+        mutate(natural_growth = births - deaths) %>%
+        arrange(TIME_PERIOD)
+
+      return(merged)
+    }, error = function(e) NULL)
+
+    if (!is.null(result2) && nrow(result2) > 0) return(result2)
+
+    # Opcja 3: Tylko przyrost naturalny z demo_r_gind3
+    result3 <- tryCatch({
+      get_eurostat("demo_r_gind3", time_format = "date") %>%
+        filter(geo == input$pop_country, indic_de == "NATGRO") %>%
+        mutate(year = year(TIME_PERIOD)) %>%
+        select(geo, TIME_PERIOD, natural_growth = values, year) %>%
+        filter(between(year, input$pop_years[1], input$pop_years[2])) %>%
+        mutate(births = NA_real_, deaths = NA_real_) %>%
+        arrange(TIME_PERIOD)
+    }, error = function(e) NULL)
+
+    if (!is.null(result3) && nrow(result3) > 0) return(result3)
+
+    # Opcja 4: Spróbuj demo_gind z różnymi kodami
+    result4 <- tryCatch({
+      # Sprawdź jakie wskaźniki są dostępne
+      available_indicators <- get_eurostat("demo_gind", time_format = "date") %>%
+        filter(geo == input$pop_country) %>%
+        distinct(indic_de) %>%
+        pull(indic_de)
+
+      # Znajdź odpowiednie wskaźniki
+      birth_codes <- c("GBIRTHRT", "BIRTH_RT", "CBR", "GRATE")
+      death_codes <- c("GDEATHRT", "DEATH_RT", "CDR", "DRATE")
+
+      birth_code <- intersect(birth_codes, available_indicators)[1]
+      death_code <- intersect(death_codes, available_indicators)[1]
+
+      if (!is.na(birth_code) && !is.na(death_code)) {
+        births <- get_eurostat("demo_gind", time_format = "date") %>%
+          filter(geo == input$pop_country, indic_de == birth_code) %>%
+          mutate(year = year(TIME_PERIOD)) %>%
+          select(geo, TIME_PERIOD, births = values, year) %>%
+          filter(between(year, input$pop_years[1], input$pop_years[2]))
+
+        deaths <- get_eurostat("demo_gind", time_format = "date") %>%
+          filter(geo == input$pop_country, indic_de == death_code) %>%
+          mutate(year = year(TIME_PERIOD)) %>%
+          select(geo, TIME_PERIOD, deaths = values, year) %>%
+          filter(between(year, input$pop_years[1], input$pop_years[2]))
+
+        merged <- full_join(births, deaths, by = c("geo", "TIME_PERIOD", "year")) %>%
+          mutate(natural_growth = births - deaths) %>%
+          arrange(TIME_PERIOD)
+
+        return(merged)
+      }
+
+      return(NULL)
+    }, error = function(e) NULL)
+
+    if (!is.null(result4) && nrow(result4) > 0) return(result4)
+
+    # Jeśli nic nie działa, zwróć pustą ramkę danych
+    return(data.frame(
+      geo = character(),
+      TIME_PERIOD = as.Date(character()),
+      births = numeric(),
+      deaths = numeric(),
+      natural_growth = numeric(),
+      year = numeric()
+    ))
   })
 
-  # Urodzenia i zgony
-birth_death_data <- reactive({
-  tryCatch({
-    get_eurostat("demo_r_gind3", time_format = "date") %>%
-      filter(geo == input$pop_country, indic_de == "NATGRO") %>%
-      mutate(year = year(TIME_PERIOD)) %>%
-      select(geo, TIME_PERIOD, natural_growth = values, year) %>%
-      filter(between(year, input$pop_years[1], input$pop_years[2]))
-  }, error = function(e) {
-    data.frame(geo = character(), TIME_PERIOD = as.Date(character()), 
-               natural_growth = numeric(), year = numeric())
+  # Dzietność - UPROSZCZONE z lepszą obsługą błędów
+  fertility_data <- reactive({
+    # Główna tabela dzietności
+    result1 <- tryCatch({
+      get_eurostat("demo_tfr", time_format = "date") %>%
+        filter(geo == input$pop_country) %>%
+        select(geo, TIME_PERIOD, fertility = values) %>%
+        mutate(year = year(TIME_PERIOD)) %>%
+        filter(between(year, input$pop_years[1], input$pop_years[2])) %>%
+        arrange(TIME_PERIOD)
+    }, error = function(e) NULL)
+
+    if (!is.null(result1) && nrow(result1) > 0) return(result1)
+
+    # Alternatywna tabela
+    result2 <- tryCatch({
+      get_eurostat("demo_find", time_format = "date") %>%
+        filter(geo == input$pop_country) %>%
+        select(geo, TIME_PERIOD, fertility = values) %>%
+        mutate(year = year(TIME_PERIOD)) %>%
+        filter(between(year, input$pop_years[1], input$pop_years[2])) %>%
+        arrange(TIME_PERIOD)
+    }, error = function(e) NULL)
+
+    if (!is.null(result2) && nrow(result2) > 0) return(result2)
+
+    # Pusta ramka danych
+    return(data.frame(
+      geo = character(),
+      TIME_PERIOD = as.Date(character()),
+      fertility = numeric(),
+      year = numeric()
+    ))
   })
-})
 
-
-  # Dzietność
-fertility_data <- reactive({
-  tryCatch({
-    get_eurostat("demo_tfr", time_format = "date") %>%
-      filter(geo == input$pop_country) %>%
-      select(geo, TIME_PERIOD, fertility = values) %>%
-      mutate(year = year(TIME_PERIOD)) %>%
-      filter(between(year, input$pop_years[1], input$pop_years[2]))
-  }, error = function(e) {
-    data.frame(geo = character(), TIME_PERIOD = as.Date(character()), 
-               fertility = numeric(), year = numeric())
-  })
-})
-
-
-  # Wiek mediana
+  # Wiek mediana - UPROSZCZONE
   median_age_data <- reactive({
     tryCatch({
       get_eurostat("demo_pjanind", time_format = "date") %>%
         filter(geo == input$pop_country, indic_de == "MEDAGEPOP") %>%
         select(geo, TIME_PERIOD, median_age = values) %>%
         mutate(year = year(TIME_PERIOD)) %>%
-        filter(between(year, input$pop_years[1], input$pop_years[2]))
+        filter(between(year, input$pop_years[1], input$pop_years[2])) %>%
+        arrange(TIME_PERIOD)
     }, error = function(e) {
-      data.frame(geo = character(), TIME_PERIOD = as.Date(character()), 
-                median_age = numeric(), year = numeric())
+      data.frame(
+        geo = character(),
+        TIME_PERIOD = as.Date(character()),
+        median_age = numeric(),
+        year = numeric()
+      )
     })
   })
 
   # --- VALUE BOXES ---
-  
+
   output$pop_vb_total <- renderValueBox({
     dane <- pop_data() %>% filter(geo == input$pop_country)
     latest <- tail(dane, 1)
@@ -171,12 +289,18 @@ fertility_data <- reactive({
   output$pop_vb_growth <- renderValueBox({
     dane <- birth_death_data()
     if (nrow(dane) == 0) {
-      return(valueBox("Brak danych", subtitle = "Przyrost naturalny", icon = icon("chart-line"), color = "green"))
+      return(valueBox("Brak danych", subtitle = "Przyrost naturalny", icon = icon("chart-line"), color = "yellow"))
     }
-    latest <- tail(dane, 1)
-    if (is.na(latest$natural_growth)) {
-      return(valueBox("Brak danych", subtitle = "Przyrost naturalny", icon = icon("chart-line"), color = "green"))
+
+    # Znajdź najnowszy dostępny rok z danymi
+    latest <- dane %>%
+      filter(!is.na(natural_growth)) %>%
+      tail(1)
+
+    if (nrow(latest) == 0) {
+      return(valueBox("Brak danych", subtitle = "Przyrost naturalny", icon = icon("chart-line"), color = "yellow"))
     }
+
     valueBox(
       sprintf("%.1f ‰", latest$natural_growth),
       subtitle = paste("Przyrost naturalny", latest$year),
@@ -227,9 +351,9 @@ fertility_data <- reactive({
     if (nrow(dane) == 0) {
       return(plot_ly() %>% layout(title = "Brak danych do wyświetlenia"))
     }
-    
+
     dane$pop_mln <- dane$values / 1000000
-    
+
     plot_ly(
       data = dane,
       x = ~TIME_PERIOD,
@@ -246,114 +370,152 @@ fertility_data <- reactive({
       )
   })
 
-  # Piramida wieku
-  output$pop_pyramid <- renderPlotly({
-    dane <- pop_age_structure()
-    if (nrow(dane) == 0) {
-      return(plot_ly() %>% layout(title = "Brak danych o strukturze wiekowej"))
-    }
-    
-    plot_ly(
-      data = dane,
-      labels = ~age_group,
-      values = ~population,
-      type = "pie",
-      textinfo = "label+percent",
-      textposition = "inside"
-    ) %>%
-      layout(
-        title = paste("Struktura wiekowa", input$pop_years[2]),
-        legend = list(orientation = "v", x = 1.1, y = 0.5)
-      )
-  })
-
-  # Trend urodzeń i zgonów
+  # Trend urodzeń i zgonów - POPRAWIONE z lepszą obsługą danych
   output$birth_death_trend <- renderPlotly({
     dane <- birth_death_data()
     if (nrow(dane) == 0) {
       return(plot_ly() %>% layout(title = "Brak danych o urodzeniach i zgonach"))
     }
-    
-    p <- plot_ly(data = dane, x = ~TIME_PERIOD) %>%
-      add_trace(y = ~births, type = "scatter", mode = "lines+markers", 
-                name = "Urodzenia (‰)", line = list(color = "green")) %>%
-      add_trace(y = ~deaths, type = "scatter", mode = "lines+markers", 
-                name = "Zgony (‰)", line = list(color = "red")) %>%
-      add_trace(y = ~natural_growth, type = "scatter", mode = "lines+markers", 
-                name = "Przyrost naturalny (‰)", line = list(color = "blue"))
-    
+
+    p <- plot_ly(data = dane, x = ~TIME_PERIOD)
+
+    # Dodaj linie tylko jeśli dane istnieją i nie są wszystkie NA
+    if ("births" %in% names(dane) && !all(is.na(dane$births))) {
+      p <- p %>% add_trace(y = ~births, type = "scatter", mode = "lines+markers",
+                          name = "Urodzenia (‰)", line = list(color = "green"))
+    }
+
+    if ("deaths" %in% names(dane) && !all(is.na(dane$deaths))) {
+      p <- p %>% add_trace(y = ~deaths, type = "scatter", mode = "lines+markers",
+                          name = "Zgony (‰)", line = list(color = "red"))
+    }
+
+    if ("natural_growth" %in% names(dane) && !all(is.na(dane$natural_growth))) {
+      p <- p %>% add_trace(y = ~natural_growth, type = "scatter", mode = "lines+markers",
+                          name = "Przyrost naturalny (‰)", line = list(color = "blue"))
+    }
+
     p %>% layout(
       title = "Urodzenia, zgony i przyrost naturalny",
       xaxis = list(title = "Rok"),
       yaxis = list(title = "Na 1000 mieszkańców"),
-      legend = list(x = 0, y = 1)
+      legend = list(
+        orientation = "h",  # pozioma orientacja
+        x = 0.5,           # wyśrodkowanie poziomo
+        xanchor = "center", # punkt zakotwiczenia na środku
+        y = -0.2,          # umieszczenie pod osią X
+        yanchor = "top"    # zakotwiczenie u góry legendy
+      ),
+      margin = list(b = 80)  # zwiększ dolny margines dla legendy
     )
   })
 
   # Trend dzietności
   output$fertility_trend <- renderPlotly({
-    dane <- fertility_data()
-    if (nrow(dane) == 0) {
-      return(plot_ly() %>% layout(title = "Brak danych o dzietności"))
-    }
-    
-    plot_ly(
-      data = dane,
-      x = ~TIME_PERIOD,
-      y = ~fertility,
-      type = "scatter",
-      mode = "lines+markers",
-      line = list(color = "orange", width = 2),
-      marker = list(size = 6)
-    ) %>%
-      add_hline(y = 2.1, line = list(color = "red", dash = "dash"), 
-                annotation = list(text = "Poziom zastępowalności (2.1)", x = 0.5, y = 2.1)) %>%
-      layout(
-        title = "Współczynnik dzietności",
-        xaxis = list(title = "Rok"),
-        yaxis = list(title = "Dzieci na kobietę")
-      )
-  })
+  dane <- fertility_data()
+  if (nrow(dane) == 0) {
+    return(plot_ly() %>% layout(title = "Brak danych o dzietności"))
+  }
 
-  # Porównanie krajów
+  # tylko wybrany kraj
+  dane <- dane %>% filter(geo == input$pop_country)
+
+  plot_ly(
+    data = dane,
+    x = ~TIME_PERIOD,
+    y = ~fertility,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "Dzietność",
+    line = list(color = "orange", width = 2),
+    marker = list(size = 6, color = "orange")
+  ) %>%
+    add_trace(
+      x = c(min(dane$TIME_PERIOD), max(dane$TIME_PERIOD)),
+      y = c(2.1, 2.1),
+      type = "scatter",
+      mode = "lines",
+      name = "Poziom zastępowalności (2.1)",
+      line = list(dash = "dash", color = "red", width = 2)
+    ) %>%
+    layout(
+      title = paste("Współczynnik dzietności -", input$pop_country),
+      xaxis = list(title = "Rok"),
+      yaxis = list(title = "Dzieci na kobietę", rangemode = "tozero"),
+      legend = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.2)
+    )
+})
+
+  # Porównanie krajów - POPRAWIONE z lepszą obsługą danych
   output$pop_comparison <- renderPlotly({
     rok <- input$pop_comparison_year
     indicator <- input$pop_indicator
-    
+
     if (indicator == "population") {
       dane <- pop_data() %>%
-      filter(year == rok) %>%
-      mutate(value = values / 1000000, unit = "mln") %>%
-      arrange(desc(value)) %>%
-      slice(-1:-3)  # usuń 3 największe
+        filter(year == rok) %>%
+        mutate(value = values / 1000000, unit = "mln") %>%
+        arrange(desc(value)) %>%
+        slice(-1:-3)  # usuń 3 największe
 
       title_text <- paste("Populacja w krajach UE -", rok)
       y_title <- "Populacja (mln)"
-      
+
     } else if (indicator == "natural_growth") {
-      dane <- get_eurostat("demo_gind", time_format = "date") %>%
-        filter(indic_de %in% c("GRATE", "DRATE")) %>%
-        mutate(year = year(TIME_PERIOD)) %>%
-        filter(year == rok) %>%
-        pivot_wider(names_from = indic_de, values_from = values) %>%
-        mutate(value = GRATE - DRATE, unit = "‰") %>%
-        select(geo, value, unit) %>%
-        na.omit() %>%
-        arrange(desc(value))
+      dane <- tryCatch({
+        # Spróbuj demo_r_gind3 najpierw
+        result <- get_eurostat("demo_r_gind3", time_format = "date") %>%
+          filter(indic_de == "NATGRO") %>%
+          mutate(year = year(TIME_PERIOD)) %>%
+          filter(year == rok) %>%
+          mutate(value = values, unit = "‰") %>%
+          select(geo, value, unit) %>%
+          na.omit() %>%
+          arrange(desc(value))
+
+        if (nrow(result) == 0) {
+          # Jeśli brak danych, spróbuj obliczyć z różnicy
+          births <- get_eurostat("demo_r_gind3", time_format = "date") %>%
+            filter(indic_de == "GBIRTHRT") %>%
+            mutate(year = year(TIME_PERIOD)) %>%
+            filter(year == rok) %>%
+            select(geo, births = values)
+
+          deaths <- get_eurostat("demo_r_gind3", time_format = "date") %>%
+            filter(indic_de == "GDEATHRT") %>%
+            mutate(year = year(TIME_PERIOD)) %>%
+            filter(year == rok) %>%
+            select(geo, deaths = values)
+
+          result <- inner_join(births, deaths, by = "geo") %>%
+            mutate(value = births - deaths, unit = "‰") %>%
+            select(geo, value, unit) %>%
+            na.omit() %>%
+            arrange(desc(value))
+        }
+
+        return(result)
+      }, error = function(e) {
+        data.frame(geo = character(), value = numeric(), unit = character())
+      })
       title_text <- paste("Przyrost naturalny w krajach UE -", rok)
       y_title <- "Przyrost naturalny (‰)"
-      
+
     } else if (indicator == "fertility") {
-      dane <- get_eurostat("demo_tfr", time_format = "date") %>%
-        mutate(year = year(TIME_PERIOD)) %>%
-        filter(year == rok) %>%
-        mutate(value = values, unit = "dzieci/kobieta") %>%
-        select(geo, value, unit) %>%
-        na.omit() %>%
-        arrange(desc(value))
+      dane <- tryCatch({
+        get_eurostat("demo_tfr", time_format = "date") %>%
+          mutate(year = year(TIME_PERIOD)) %>%
+          filter(year == rok) %>%
+          mutate(value = values, unit = "dzieci/kobieta") %>%
+          select(geo, value, unit) %>%
+          na.omit() %>%
+          arrange(desc(value))
+      }, error = function(e) {
+        data.frame(geo = character(), value = numeric(), unit = character())
+      })
       title_text <- paste("Współczynnik dzietności w krajach UE -", rok)
       y_title <- "Dzieci na kobietę"
-      
+
     } else if (indicator == "median_age") {
       dane <- tryCatch({
         get_eurostat("demo_pjanind", time_format = "date") %>%
@@ -370,15 +532,15 @@ fertility_data <- reactive({
       title_text <- paste("Wiek mediana w krajach UE -", rok)
       y_title <- "Wiek mediana (lat)"
     }
-    
+
     if (nrow(dane) == 0) {
       return(plot_ly() %>% layout(title = "Brak danych do wyświetlenia"))
     }
-    
+
     # Dodaj nazwy krajów
     dane$nazwa <- nazwy_krajow_pl[dane$geo]
     dane$nazwa[is.na(dane$nazwa)] <- dane$geo[is.na(dane$nazwa)]
-    
+
     plot_ly(
       data = dane,
       x = ~reorder(nazwa, value),
@@ -386,7 +548,7 @@ fertility_data <- reactive({
       type = "bar",
       text = ~paste0("Kraj: ", nazwa, "<br>Wartość: ", sprintf("%.2f", value), " ", unit),
       hoverinfo = "text",
-      marker = list(color = 'rgba(70,130,180,0.7)', 
+      marker = list(color = 'rgba(70,130,180,0.7)',
                    line = list(color = 'rgba(70,130,180,1)', width = 1.5))
     ) %>%
       layout(
