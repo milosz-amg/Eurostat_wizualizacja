@@ -13,6 +13,7 @@ source("wizualizacja.R")
 source("pkb.R")
 source("zatrudnienie.R")
 source("energia.R")
+source("emisje.R")
 # ----------------------------------------------------------------------------
 
 # === UI ===
@@ -23,7 +24,8 @@ ui <- dashboardPage(
       menuItem("Wizualizacja", tabName = "wizualizacja", icon = icon("chart-line")),
       menuItem("Finanse", tabName = "pkb", icon = icon("money-bill")),
       menuItem("Zatrudnienie", tabName = "zatrudnienie", icon = icon("user-tie")),
-      menuItem("Energia", tabName = "energia", icon = icon("bolt"))
+      menuItem("Energia", tabName = "energia", icon = icon("bolt")),
+      menuItem("Emisje CO₂",    tabName = "emisje",        icon = icon("cloud"))
     )
   ),
   dashboardBody(
@@ -31,7 +33,8 @@ ui <- dashboardPage(
       tab_wizualizacja_ui,
       tab_pkb_ui,
       tab_zatrudnienie_ui,
-      tab_energia_ui
+      tab_energia_ui,
+      tab_emisje_ui
     )
   )
 )
@@ -50,6 +53,7 @@ server <- function(input, output, session) {
   tab_pkb_server(input, output, session, dane_pkb)
   tab_zatrudnienie_server(input, output, session)
   tab_energia_server(input, output, session)
+  tab_emisje_server(input, output, session)
 }
 
 shinyApp(ui, server)
