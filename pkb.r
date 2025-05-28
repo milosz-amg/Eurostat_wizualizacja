@@ -8,7 +8,11 @@ tab_pkb_ui <- tabItem(tabName = "pkb",
   fluidRow(
     column(4,
           selectInput("porownaj_kraje", "Wybierz kraje:",
-            choices = c("PL", "DE", "FR", "IT", "ES"),
+              choices = c(
+                "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
+                "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
+                "SI", "ES", "SE", "NO", "CH", "IS", "UK", "TR", "ME", "RS", "MK", "EL", "AL"
+  ),
             selected = "PL", multiple = TRUE)
     ),
     column(4,
