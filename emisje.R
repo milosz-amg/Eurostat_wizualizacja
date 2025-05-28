@@ -20,12 +20,12 @@ if (!exists("co2_all", envir = .GlobalEnv) ||
     mutate(
       rok = year(TIME_PERIOD),
       sektor = case_when(
-        grepl("^CRF1", src_crf) ~ "ENERGY",
-        grepl("^CRF2", src_crf) ~ "IPPU",
-        grepl("^CRF3", src_crf) ~ "AGRICULTURE",
-        grepl("^CRF4", src_crf) ~ "LULUCF",
-        grepl("^CRF5", src_crf) ~ "WASTE",
-        TRUE                    ~ "OTHER")
+        grepl("^CRF1", src_crf) ~ "Energia",
+        grepl("^CRF2", src_crf) ~ "Przemysł",
+        grepl("^CRF3", src_crf) ~ "Rolnictwo",
+        grepl("^CRF4", src_crf) ~ "Zm. Gruntowe",
+        grepl("^CRF5", src_crf) ~ "Odpady",
+        TRUE                    ~ "Inne")
     )
   assign("co2_all", co2_all, envir = .GlobalEnv)
 }
@@ -55,9 +55,12 @@ tab_emisje_ui <- tabItem(
   ),
   fluidRow(box(width = 12, plotlyOutput("co2_trend", height = "400px"))),
   fluidRow(
-    box(width = 6, plotlyOutput("co2_pie_sector",   height = "300px")),
-    box(width = 6, plotlyOutput("co2_bar_countries",height = "300px"))
-  )
+    box(width = 9, plotlyOutput("co2_pie_sector",   height = "400px")),
+  ),
+  br(),
+  fluidRow(
+    box(width = 12, plotlyOutput("co2_bar_countries", height = "500px")
+    )
 )
 
 # ────────────────────────────────────────────────────────────────────────
@@ -150,13 +153,34 @@ tab_emisje_server <- function(input, output, session) {
   output$co2_bar_countries <- renderPlotly({
     d <- co2_total() |>
       filter(rok == input$co2_years[2]) |>
-      left_join(eurostat::eu_countries, by=c("geo"="code")) |>
+      left_join(eurostat::eu_countries, by = c("geo" = "code")) |>
       arrange(total)
-    plot_ly(d, x = ~total, y = ~reorder(name,total),
-            type="bar", orientation="h",
-            marker=list(color="rgba(178,34,34,0.7)",
-                        line=list(color="rgba(178,34,34,1)", width=1))) |>
-      layout(title=paste("Emisje CO₂ –", input$co2_years[2]),
-             xaxis=list(title="kt CO₂"), yaxis=list(title=""))
+
+    plot_ly(
+      d,
+      x = ~total,
+      y = ~reorder(name, total),
+      type = "bar",
+      orientation = "h",
+      source = "bar_co2",                          # ← NEW
+      marker = list(color="rgba(178,34,34,0.7)",
+                    line  = list(color="rgba(178,34,34,1)", width = 1))
+    ) |>
+      layout(title = paste("Emisje CO₂ –", input$co2_years[2]),
+            xaxis = list(title = "kt CO₂"),
+            yaxis = list(title = ""))
+  })
+
+  # klik w słupek  →  zmiana pola „Kraj”
+  observeEvent(event_data("plotly_click", source = "bar_co2"), {
+    ed <- event_data("plotly_click", source = "bar_co2")
+    if (!is.null(ed)) {
+      kraj <- ed$y                                      # oś Y (poziome bary)
+      code <- eurostat::eu_countries$code[
+                match(kraj, eurostat::eu_countries$name)]
+      if (!is.na(code)) {
+        updateSelectInput(session, "co2_country", selected = code)
+      }
+    }
   })
 }

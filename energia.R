@@ -21,6 +21,13 @@ tab_energia_ui <- tabItem(
   tabName = "energia",
   h2("Odnawialne źródła energii (OZE) w krajach UE"),
   fluidRow(
+    column(4,
+           sliderInput("oze_bar_year", "Rok do porównania krajów UE:",
+                       min = 2004, max = 2022, value = 2022, step = 1, sep = ""))
+  ),
+  fluidRow(box(width = 12, plotlyOutput("oze_bar_countries", height = "400px"))),
+  br(),
+  fluidRow(
     box(width = 6,
         selectInput("energy_country", "Kraj:",
                     choices = eurostat::eu_countries$code,
@@ -40,13 +47,7 @@ tab_energia_ui <- tabItem(
     box(width = 6, plotlyOutput("oze_pie",         height = "300px")),
     box(width = 6, plotlyOutput("oze_pie_sources", height = "300px"))
   ),
-  br(),
-  fluidRow(
-    column(4,
-           sliderInput("oze_bar_year", "Rok do porównania krajów UE:",
-                       min = 2004, max = 2022, value = 2022, step = 1, sep = ""))
-  ),
-  fluidRow(box(width = 12, plotlyOutput("oze_bar_countries", height = "400px")))
+  br()
 )
 
 # --------------------------------------------------------------------------
@@ -158,16 +159,39 @@ tab_energia_server <- function(input, output, session) {
       select(geo, values) |>
       left_join(eurostat::eu_countries, by = c("geo" = "code")) |>
       arrange(desc(values))
-    plot_ly(dane, x = ~reorder(name, values), y = ~values,
-            type = "bar",
-            text = ~sprintf("Kraj: %s<br>OZE: %.1f%%", name, values),
-            hoverinfo = "text",
-            marker = list(color = "rgba(34,139,34,0.7)",
-                          line   = list(color = "rgba(34,139,34,1)", width = 1.5))) |>
-      layout(title = paste("Udział OZE w UE –", input$oze_bar_year),
-             xaxis = list(title = "Kraj", tickangle = -45),
-             yaxis = list(title = "%"), bargap = 0.2)
+
+    plot_ly(
+      dane,
+      x = ~reorder(name, values),
+      y = ~values,
+      type = "bar",
+      source = "bar_energy",                     # ← TU, wewnątrz plot_ly()
+      text  = ~sprintf("Kraj: %s<br>OZE: %.1f%%", name, values),
+      hoverinfo = "text",
+      marker = list(color = "rgba(34,139,34,0.7)",
+                    line   = list(color = "rgba(34,139,34,1)", width = 1.5))
+    ) |>
+      layout(
+        title = paste("Udział OZE w UE –", input$oze_bar_year),
+        xaxis = list(title = "Kraj", tickangle = -45),
+        yaxis = list(title = "%"),
+        bargap = 0.2
+      )
   })
+
+  # klik w słupek → zmiana selectInput
+  observeEvent(event_data("plotly_click", source = "bar_energy"), {
+    ed <- event_data("plotly_click", source = "bar_energy")
+    if (!is.null(ed)) {
+      kraj_nazwa <- ed$x
+      code <- eurostat::eu_countries$code[
+                match(kraj_nazwa, eurostat::eu_countries$name)]
+      if (!is.na(code)) {
+        updateSelectInput(session, "energy_country", selected = code)
+      }
+    }
+  })
+
 
   # 4-f) Grouped-source pie -----------------------------------------------
 
@@ -183,7 +207,7 @@ tab_energia_server <- function(input, output, session) {
                   "Biogaz",
                   "Biopaliwa ciekłe")
 
-  src_cols <- c("#1f77b4",  # Wiatr
+  src_cols <- c("#8FBFE0",  # Wiatr
                 "#2ca02c",  # Słońce
                 "#0072B2",  # Woda
                 "#d55e00",  # Geotermia
@@ -226,13 +250,19 @@ tab_energia_server <- function(input, output, session) {
     if (nrow(dane) == 0)
       return(plot_ly() |> layout(title = "Brak danych o źródłach OZE"))
 
-    plot_ly(dane,
-            labels = ~grupa,
-            values = ~energia,
-            type   = "pie",
-            textinfo = "none",
-            hoverinfo = "label+percent",
-            marker = list(colors = src_cols[levels(dane$grupa)])) |>
+    # weź kolor odpowiadający każdej grupie
+    dane <- dane |> mutate(col = src_cols[match(grupa, src_levels)])
+
+    plot_ly(
+      dane,
+      labels = ~grupa,
+      values = ~energia,
+      type   = "pie",
+      sort   = FALSE,                # ← NIE sortuj wg wartości
+      textinfo = "none",
+      hoverinfo = "label+percent",
+      marker = list(colors = ~col)   # ← kolor per-wiersz
+    ) |>
       layout(title  = paste("Źródła OZE –",
                             input$energy_country, input$energy_years[2]),
             legend = list(orientation = "h", x = 0.1, y = -0.1))

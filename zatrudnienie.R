@@ -1,5 +1,5 @@
 # zatrudnienie.R ------------------------------------------------------------
-# Zakładka Shiny "Zatrudnienie" – filtry zgodne z Twoimi danymi
+# Zakładka Shiny "Zatrudnienie"
 
 library(shiny)
 library(shinydashboard)
